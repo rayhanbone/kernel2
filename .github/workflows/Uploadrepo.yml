@@ -73,12 +73,12 @@ on:
           - gcc
           - gcc-14.2
       target_repo:
-        description: "Pilih repo tujuan upload (tes-rep, DIRGHA80, HOUJIE80)"
+        description: "Pilih repo tujuan upload (rayhanbone, DIRGHA80, HOUJIE80)"
         required: false
-        default: "tes-rep"
+        default: "rayhanbone"
         type: choice
         options:
-          - tes-rep
+          - rayhanbone
           - Dirgha80
           - Houjie80
       kernel_sign:
@@ -127,9 +127,9 @@ jobs:
         id: choose_target
         run: |
           case "${{ github.event.inputs.target_repo }}" in
-            tes-rep)
+            rayhanbone)
               echo "PAT=${{ secrets.TARGET_REPO_TES }}" >> $GITHUB_ENV
-              echo "REPO_TARGET=tes-rep/kernel" >> $GITHUB_ENV ;;
+              echo "REPO_TARGET=rayhanbone/kernel2" >> $GITHUB_ENV ;;
             DIRGHA80)
               echo "PAT=${{ secrets.TARGET_REPO_DIRGHA80 }}" >> $GITHUB_ENV
               echo "REPO_TARGET=Dirgha80/kernel" >> $GITHUB_ENV ;;
