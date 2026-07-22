@@ -16,15 +16,7 @@ on:
           - Houjie80
           - tes-rep
           - tes-rep@tes
-          - feryw@dev
-          - feryw/linux@amlogic-6.18
-          - tes-rep/linux@amlogic-6.18
           - sib0ndt/linux-6.1.66
-          - chewitt/linux@amlogic-6.17.y
-          - tes-rep/linuxx@amlogic-6.18.y
-          - tes-rep/linuxx@amlogic-6.17.y
-          - tes-rep/linux@linux-6.17.y
-          - tes-rep/linux@linux-6.18.y
       kernel_version:
         description: "Select kernel version"
         required: false
@@ -43,8 +35,6 @@ on:
           - 5.4.y_5.10.y
           - 5.15.y_6.1.y
           - 6.6.y_6.12.y
-          - 6.17.y
-          - 6.18.y
       kernel_auto:
         description: "Auto use the latest kernel"
         required: false
@@ -72,15 +62,16 @@ on:
           - clang
           - gcc
           - gcc-14.2
-      target_repo:
-        description: "Pilih repo tujuan upload (tes-rep, DIRGHA80, HOUJIE80)"
+      compress_format:
+        description: "Set the initrd compression format"
         required: false
-        default: "tes-rep"
+        default: "xz"
         type: choice
         options:
-          - tes-rep
-          - Dirgha80
-          - Houjie80
+          - xz
+          - gzip
+          - zstd
+          - lzma
       kernel_sign:
         description: "Set the kernel custom signature"
         required: false
@@ -95,7 +86,6 @@ on:
           - kernel-config/release/s905x4
           - kernel-config/release/general
           - kernel-config/release/DBAI
-          - kernel-config/release/Tes
           - false
       kernel_mu:
         description: "Select the kernel source"
@@ -123,23 +113,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set Token and Target Repo
-        id: choose_target
-        run: |
-          case "${{ github.event.inputs.target_repo }}" in
-            tes-rep)
-              echo "PAT=${{ secrets.TARGET_REPO_TES }}" >> $GITHUB_ENV
-              echo "REPO_TARGET=tes-rep/kernel" >> $GITHUB_ENV ;;
-            DIRGHA80)
-              echo "PAT=${{ secrets.TARGET_REPO_DIRGHA80 }}" >> $GITHUB_ENV
-              echo "REPO_TARGET=Dirgha80/kernel" >> $GITHUB_ENV ;;
-            HOUJIE80)
-              echo "PAT=${{ secrets.TARGET_REPO_HOUJIE80 }}" >> $GITHUB_ENV
-              echo "REPO_TARGET=Houjie80/kernel2" >> $GITHUB_ENV ;;
-            *)
-              echo "::error ::Pilihan repo tidak valid!"; exit 1 ;;
-          esac
-  
       - name: Initialization environment
         id: init
         env:
@@ -203,7 +176,7 @@ jobs:
           kernel_toolchain: ${{ inputs.kernel_toolchain }}
           kernel_sign: ${{ inputs.kernel_sign }}
           kernel_config: ${{ inputs.kernel_config }}
-          compress_format: xz
+          compress_format: ${{ inputs.compress_format }}
           silent_log: true
 
       - name: Upload Kernel to Release (repo ini)
@@ -216,40 +189,28 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           body: |
             - The kernel can be used to compile Armbian and OpenWrt.
-            - The kernel source code comes from: ${{ inputs.kernel_source }}
-            - The kernel compilation toolchain: ${{ inputs.kernel_toolchain }}
-            - The kernel version: ${{ inputs.kernel_version }}
-            - The kernel nama: ${{ inputs.kernel_sign }}
-            - This is a `${{ inputs.kernel_mu }}` kernel, which can be used in Armbian and OpenWrt.
-            - 这是`稳定版`内核，可以在 Armbian 和 OpenWrt 里使用。
-            ## Supported Devices
-            | Amlogic | MODEL | WIFI |
-            | -------- | ------- | ------- |
-            | **S905x**  | **HG680P**<br>**B860H** | **ON**<br>**NOT TEST** |
-            | **S905X4** | **ADVAN AT01**<br>**AKARI** | **OFF**<br>**OFF** |
-            | **S905x2** | **HG680FJ** | **NOT TEST** (`-`) |
+            - Kernel source: ${{ inputs.kernel_source }}
+            - Version: ${{ inputs.kernel_version }}
+            - Toolchain: ${{ inputs.kernel_toolchain }}
+            - Signature: ${{ inputs.kernel_sign }}
+            - Type: ${{ inputs.kernel_mu }}
 
       - name: Upload Kernel to Release (repo lain)
         uses: softprops/action-gh-release@v1
         if: ${{ env.PACKAGED_STATUS == 'success' || success() }} && !cancelled()
         env:
-          GITHUB_TOKEN: ${{ env.PAT }}
+          GITHUB_TOKEN: ${{ secrets.UPLOAD_PAT }}
         with:
           tag_name: kernel_${{ inputs.kernel_mu }}
-          repository: ${{ env.REPO_TARGET }}  # GANTI dengan repo tujuan kamu
-          name: Kernel_${{ inputs.kernel_mu }}
+          repository: rayhanbone/linux-kernel-out  # GANTI dengan repo tujuan kamu
+          name: Kernel Release ${{ inputs.kernel_mu }}
           body: |
             ### Kernel Build Information
+            - Kernel Source: `${{ inputs.kernel_source }}`
             - Version: `${{ inputs.kernel_version }}`
             - Toolchain: `${{ inputs.kernel_toolchain }}`
             - Signature: `${{ inputs.kernel_sign }}`
             - Kernel Type: `${{ inputs.kernel_mu }}`
-            ## Supported Devices
-            | Amlogic | MODEL | WIFI |
-            | -------- | ------- | ------- |
-            | **S905x**  | **HG680P**<br>**B860H** | **ON**<br>**NOT TEST** |
-            | **S905X4** | **ADVAN AT01**<br>**AKARI** | **OFF**<br>**OFF** |
-            | **S905x2** | **HG680FJ** | **NOT TEST** (`-`) |
 
           files: |
             /builder/output/*
