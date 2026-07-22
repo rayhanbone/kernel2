@@ -1,4 +1,10 @@
-name: Compile release repo ini
+#==========================================================================
+# Description: Compile release repo ini
+# Copyright (C) 2021 https://github.com/unifreq/openwrt_packit
+# Copyright (C) 2021 https://github.com/ophub/kernel
+#==========================================================================
+
+name: Compile Release Repo Ini
 
 on:
   repository_dispatch:
@@ -54,7 +60,7 @@ on:
         description: "Delete the source after compilation"
         required: false
         default: true
-        type: boolean   
+        type: boolean    
       kernel_package:
         description: "Select compile package list"
         required: false
@@ -89,7 +95,7 @@ on:
           - kernel-config/release/Tes
           - "false"
       kernel_mu:
-        description: "Select the kernel source"
+        description: "Select the kernel tag designation"
         required: false
         default: "wifi_on"
         type: choice
@@ -107,17 +113,17 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04-arm
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
       packages: write
     if: github.event.repository.owner.id == github.event.sender.id
 
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Initialization environment
+      - name: Initialization Environment
         id: init
         env:
           DEBIAN_FRONTEND: noninteractive
@@ -130,7 +136,7 @@ jobs:
           sudo -E apt-get -y update
           sudo -E apt-get -y purge azure-cli ghc* zulu* llvm* firefox google* dotnet* powershell openjdk* mongodb* moby* || true
           
-          # Unduh daftar paket dan install
+          # Unduh daftar paket dependensi build
           BUILD_PACKAGES=$(curl -fsSL https://tinyurl.com/ubuntu2204-build-armbian)
           sudo -E apt-get -y install ${BUILD_PACKAGES}
           
@@ -142,11 +148,16 @@ jobs:
           sudo timedatectl set-timezone "${TZ}"
           echo "status=success" >> ${GITHUB_OUTPUT}
 
-      - name: Create simulated physical disk
+      - name: Create Simulated Physical Disk (LVM)
         id: disk
         run: |
-          mnt_size=$(expr $(df -h /mnt | tail -1 | awk '{print $4}' | sed 's/[[:alpha:]]//g' | sed 's/\..*//') - 1)
-          root_size=$(expr $(df -h / | tail -1 | awk '{print $4}' | sed 's/[[:alpha:]]//g' | sed 's/\..*//') - 4)
+          mnt_size=$(expr $(df -h /mnt | tail -1 | awk '{print $4}' | sed 's/[[:alpha:]]//g' | sed 's/\..*//') - 1 2>/dev/null || echo 15)
+          root_size=$(expr $(df -h / | tail -1 | awk '{print $4}' | sed 's/[[:alpha:]]//g' | sed 's/\..*//') - 4 2>/dev/null || echo 15)
+          
+          # Fallback jika kalkulasi menghasilkan angka <= 0
+          [ "$mnt_size" -le 0 ] && mnt_size=10
+          [ "$root_size" -le 0 ] && root_size=10
+
           sudo truncate -s "${mnt_size}"G /mnt/mnt.img
           sudo truncate -s "${root_size}"G /root.img
           sudo losetup /dev/loop6 /mnt/mnt.img
@@ -158,43 +169,54 @@ jobs:
           sudo mkfs.xfs /dev/github/runner
           sudo mkdir -p /builder
           sudo mount /dev/github/runner /builder
-          sudo chown -R runner.runner /builder
+          sudo chown -R runner:runner /builder
           df -Th
 
-      - name: Create a mapped directory
+      - name: Create Mapped Directory
         id: mapped
         working-directory: /builder
         run: |
           df -hT ${PWD}
           mkdir -p /builder/{kernel,output}
-          ln -sf /builder/kernel /home/runner/work/_actions/Dirgha80/amlogic-s9xxx-armbian/main/compile-kernel/kernel
-          ln -sf /builder/output /home/runner/work/_actions/Dirgha80/amlogic-s9xxx-armbian/main/compile-kernel/output
+          
+          # Pencarian lokasi action Dirgha80/amlogic-s9xxx-armbian secara terproteksi
+          ACTION_DIR=$(find /home/runner/work/_actions -type d -path "*/Dirgha80/amlogic-s9xxx-armbian/*/compile-kernel" | head -n 1)
+          if [ -z "$ACTION_DIR" ]; then
+            # Jika belum ter-clone, siapkan direktori bawaannya
+            ACTION_DIR="/home/runner/work/_actions/Dirgha80/amlogic-s9xxx-armbian/main/compile-kernel"
+            mkdir -p "$ACTION_DIR"
+          fi
+
+          ln -sf /builder/kernel "$ACTION_DIR/kernel"
+          ln -sf /builder/output "$ACTION_DIR/output"
           echo "status=success" >> ${GITHUB_OUTPUT}
 
-      - name: Compile the kernel [ ${{ inputs.kernel_version }} ]
+      - name: Compile the Kernel [ ${{ inputs.kernel_version }} ]
         uses: Dirgha80/amlogic-s9xxx-armbian@main
         if: steps.mapped.outputs.status == 'success' && !cancelled()
         with:
           build_target: kernel
-          kernel_source: ${{ inputs.kernel_source }}
-          kernel_version: ${{ inputs.kernel_version }}
-          kernel_auto: ${{ inputs.kernel_auto }}
-          delete_source: ${{ inputs.delete_source }}
-          kernel_package: ${{ inputs.kernel_package }}
-          kernel_toolchain: ${{ inputs.kernel_toolchain }}
-          kernel_sign: ${{ inputs.kernel_sign }}
-          kernel_config: ${{ inputs.kernel_config }}
+          kernel_source: ${{ inputs.kernel_source || 'tes-rep' }}
+          kernel_version: ${{ inputs.kernel_version || '6.6.y_6.12.y' }}
+          kernel_auto: ${{ inputs.kernel_auto || true }}
+          delete_source: ${{ inputs.delete_source || true }}
+          kernel_package: ${{ inputs.kernel_package || 'all' }}
+          kernel_toolchain: ${{ inputs.kernel_toolchain || 'gcc' }}
+          kernel_sign: ${{ inputs.kernel_sign || '-reyre' }}
+          kernel_config: ${{ inputs.kernel_config || 'kernel-config/release/Tes' }}
           compress_format: xz
           silent_log: true
 
-      - name: Check output files
+      - name: Check Output Files
         id: check_output
         run: |
           if [ -n "$(ls -A /builder/output 2>/dev/null)" ]; then
             echo "has_files=true" >> $GITHUB_OUTPUT
+            echo "File hasil kompilasi ditemukan:"
+            ls -lh /builder/output
           else
             echo "has_files=false" >> $GITHUB_OUTPUT
-            echo "::warning::Folder /builder/output kosong! Hasil kompilasi tidak ditemukan."
+            echo "::warning::Folder /builder/output kosong! Kompilasi gagal atau tidak menghasilkan output."
           fi
 
       - name: Upload Kernel to Release
@@ -206,16 +228,17 @@ jobs:
           allowUpdates: true
           token: ${{ secrets.GITHUB_TOKEN }}
           body: |
-            - The kernel can be used to compile Armbian and OpenWrt.
-            - The kernel source code comes from: ${{ inputs.kernel_source }}
-            - The kernel compilation toolchain: ${{ inputs.kernel_toolchain }}
-            - The kernel version: ${{ inputs.kernel_version }}
-            - The kernel nama: ${{ inputs.kernel_sign }}
-            - This is a `${{ inputs.kernel_mu }}` kernel, which can be used in Armbian and OpenWrt.
-            - 这是`稳定版`内核，可以在 Armbian 和 OpenWrt 里使用。
+            ### Kernel Build Summary
+            - **Source Code:** `${{ inputs.kernel_source }}`
+            - **Kernel Version:** `${{ inputs.kernel_version }}`
+            - **Toolchain:** `${{ inputs.kernel_toolchain }}`
+            - **Signature:** `${{ inputs.kernel_sign }}`
+            - **Kernel Type Tag:** `${{ inputs.kernel_mu }}`
+            
+            ---
             ## Supported Devices
             | Amlogic | MODEL | WIFI |
             | -------- | ------- | ------- |
-            | **S905x**  | **HG680P**<br>**B860H** | **ON**<br>**NOT TEST** |
+            | **S905X**  | **HG680P**<br>**B860H** | **ON**<br>**NOT TEST** |
             | **S905X4** | **ADVAN AT01**<br>**AKARI** | **OFF**<br>**OFF** |
-            | **S905x2** | **HG680FJ** | **NOT TEST** (`-`) |
+            | **S905X2** | **HG680FJ** | **NOT TEST** (`-`) |
