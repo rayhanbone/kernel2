@@ -1,4 +1,4 @@
-name: Compile release repo lain
+name: Compile release repo ini
 
 on:
   repository_dispatch:
@@ -72,15 +72,6 @@ on:
           - clang
           - gcc
           - gcc-14.2
-      target_repo:
-        description: "Pilih repo tujuan upload (rayhanbone, DIRGHA80, HOUJIE80)"
-        required: false
-        default: "rayhanbone"
-        type: choice
-        options:
-          - rayhanbone
-          - Dirgha80
-          - Houjie80
       kernel_sign:
         description: "Set the kernel custom signature"
         required: false
@@ -96,7 +87,7 @@ on:
           - kernel-config/release/general
           - kernel-config/release/DBAI
           - kernel-config/release/Tes
-          - false
+          - "false"
       kernel_mu:
         description: "Select the kernel source"
         required: false
@@ -117,47 +108,37 @@ env:
 jobs:
   build:
     runs-on: ubuntu-22.04-arm
-    if: ${{ github.event.repository.owner.id }} == ${{ github.event.sender.id }}
+    permissions:
+      contents: write
+      packages: write
+    if: github.event.repository.owner.id == github.event.sender.id
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set Token and Target Repo
-        id: choose_target
-        run: |
-          case "${{ github.event.inputs.target_repo }}" in
-            rayhanbone)
-              echo "PAT=${{ secrets.TARGET_REPO_TES }}" >> $GITHUB_ENV
-              echo "REPO_TARGET=rayhanbone/kernel2" >> $GITHUB_ENV ;;
-            DIRGHA80)
-              echo "PAT=${{ secrets.TARGET_REPO_DIRGHA80 }}" >> $GITHUB_ENV
-              echo "REPO_TARGET=Dirgha80/kernel" >> $GITHUB_ENV ;;
-            HOUJIE80)
-              echo "PAT=${{ secrets.TARGET_REPO_HOUJIE80 }}" >> $GITHUB_ENV
-              echo "REPO_TARGET=Houjie80/kernel2" >> $GITHUB_ENV ;;
-            *)
-              echo "::error ::Pilihan repo tidak valid!"; exit 1 ;;
-          esac
-  
       - name: Initialization environment
         id: init
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          docker rmi $(docker images -q) 2>/dev/null
-          [[ -n "${AGENT_TOOLSDIRECTORY}" ]] && sudo rm -rf "${AGENT_TOOLSDIRECTORY}"
-          sudo rm -rf /usr/share/dotnet /etc/apt/sources.list.d /usr/local/lib/android 2>/dev/null
-          sudo swapoff -a
-          sudo rm -f /swapfile /mnt/swapfile
+          docker rmi $(docker images -q) 2>/dev/null || true
+          [[ -n "${AGENT_TOOLSDIRECTORY}" ]] && sudo rm -rf "${AGENT_TOOLSDIRECTORY}" || true
+          sudo rm -rf /usr/share/dotnet /etc/apt/sources.list.d /usr/local/lib/android 2>/dev/null || true
+          sudo swapoff -a || true
+          sudo rm -f /swapfile /mnt/swapfile || true
           sudo -E apt-get -y update
           sudo -E apt-get -y purge azure-cli ghc* zulu* llvm* firefox google* dotnet* powershell openjdk* mongodb* moby* || true
-          sudo -E apt-get -y install $(curl -fsSL https://tinyurl.com/ubuntu2204-build-armbian)
+          
+          # Unduh daftar paket dan install
+          BUILD_PACKAGES=$(curl -fsSL https://tinyurl.com/ubuntu2204-build-armbian)
+          sudo -E apt-get -y install ${BUILD_PACKAGES}
+          
           sudo -E systemctl daemon-reload
           sudo -E apt-get -y autoremove --purge
           sudo -E apt-get clean
-          sudo sed -i '/NVM_DIR/d;/skel/d' /root/{.bashrc,.profile}
-          sudo rm -rf ~/{.cargo,.dotnet,.rustup}
+          sudo sed -i '/NVM_DIR/d;/skel/d' /root/{.bashrc,.profile} 2>/dev/null || true
+          sudo rm -rf ~/{.cargo,.dotnet,.rustup} 2>/dev/null || true
           sudo timedatectl set-timezone "${TZ}"
           echo "status=success" >> ${GITHUB_OUTPUT}
 
@@ -192,7 +173,7 @@ jobs:
 
       - name: Compile the kernel [ ${{ inputs.kernel_version }} ]
         uses: Dirgha80/amlogic-s9xxx-armbian@main
-        if: ${{ steps.mapped.outputs.status }} == 'success' && !cancelled()
+        if: steps.mapped.outputs.status == 'success' && !cancelled()
         with:
           build_target: kernel
           kernel_source: ${{ inputs.kernel_source }}
@@ -206,9 +187,19 @@ jobs:
           compress_format: xz
           silent_log: true
 
-      - name: Upload Kernel to Release (repo ini)
-        uses: ncipollo/release-action@main
-        if: ${{ env.PACKAGED_STATUS == 'success' || success() }} && !cancelled()
+      - name: Check output files
+        id: check_output
+        run: |
+          if [ -n "$(ls -A /builder/output 2>/dev/null)" ]; then
+            echo "has_files=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_files=false" >> $GITHUB_OUTPUT
+            echo "::warning::Folder /builder/output kosong! Hasil kompilasi tidak ditemukan."
+          fi
+
+      - name: Upload Kernel to Release
+        uses: ncipollo/release-action@v1
+        if: steps.check_output.outputs.has_files == 'true' && !cancelled()
         with:
           tag: kernel_${{ inputs.kernel_mu }}
           artifacts: ${{ env.PACKAGED_OUTPUTPATH }}/*
@@ -228,28 +219,3 @@ jobs:
             | **S905x**  | **HG680P**<br>**B860H** | **ON**<br>**NOT TEST** |
             | **S905X4** | **ADVAN AT01**<br>**AKARI** | **OFF**<br>**OFF** |
             | **S905x2** | **HG680FJ** | **NOT TEST** (`-`) |
-
-      - name: Upload Kernel to Release (repo lain)
-        uses: softprops/action-gh-release@v1
-        if: ${{ env.PACKAGED_STATUS == 'success' || success() }} && !cancelled()
-        env:
-          GITHUB_TOKEN: ${{ env.PAT }}
-        with:
-          tag_name: kernel_${{ inputs.kernel_mu }}
-          repository: ${{ env.REPO_TARGET }}  # GANTI dengan repo tujuan kamu
-          name: Kernel_${{ inputs.kernel_mu }}
-          body: |
-            ### Kernel Build Information
-            - Version: `${{ inputs.kernel_version }}`
-            - Toolchain: `${{ inputs.kernel_toolchain }}`
-            - Signature: `${{ inputs.kernel_sign }}`
-            - Kernel Type: `${{ inputs.kernel_mu }}`
-            ## Supported Devices
-            | Amlogic | MODEL | WIFI |
-            | -------- | ------- | ------- |
-            | **S905x**  | **HG680P**<br>**B860H** | **ON**<br>**NOT TEST** |
-            | **S905X4** | **ADVAN AT01**<br>**AKARI** | **OFF**<br>**OFF** |
-            | **S905x2** | **HG680FJ** | **NOT TEST** (`-`) |
-
-          files: |
-            /builder/output/*
