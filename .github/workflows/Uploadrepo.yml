@@ -179,16 +179,14 @@ jobs:
           df -hT ${PWD}
           mkdir -p /builder/{kernel,output}
           
-          # Pencarian lokasi action Dirgha80/amlogic-s9xxx-armbian secara terproteksi
-          ACTION_DIR=$(find /home/runner/work/_actions -type d -path "*/Dirgha80/amlogic-s9xxx-armbian/*/compile-kernel" | head -n 1)
-          if [ -z "$ACTION_DIR" ]; then
-            # Jika belum ter-clone, siapkan direktori bawaannya
-            ACTION_DIR="/home/runner/work/_actions/Dirgha80/amlogic-s9xxx-armbian/main/compile-kernel"
-            mkdir -p "$ACTION_DIR"
-          fi
+          # Buat struktur direktori actions bawaan runner
+          ACTION_DIR="/home/runner/work/_actions/Dirgha80/amlogic-s9xxx-armbian/main/compile-kernel"
+          mkdir -p "$ACTION_DIR"
 
           ln -sf /builder/kernel "$ACTION_DIR/kernel"
           ln -sf /builder/output "$ACTION_DIR/output"
+          ln -sf /builder/kernel "${GITHUB_WORKSPACE}/kernel"
+          ln -sf /builder/output "${GITHUB_WORKSPACE}/output"
           echo "status=success" >> ${GITHUB_OUTPUT}
 
       - name: Compile the Kernel [ ${{ inputs.kernel_version }} ]
@@ -242,3 +240,10 @@ jobs:
             | **S905X**  | **HG680P**<br>**B860H** | **ON**<br>**NOT TEST** |
             | **S905X4** | **ADVAN AT01**<br>**AKARI** | **OFF**<br>**OFF** |
             | **S905X2** | **HG680FJ** | **NOT TEST** (`-`) |
+
+      - name: Cleanup Loop Devices and Mounts
+        if: always()
+        run: |
+          sudo umount /builder 2>/dev/null || true
+          sudo vgremove -f github 2>/dev/null || true
+          sudo losetup -D 2>/dev/null || true
