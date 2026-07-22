@@ -19,7 +19,7 @@ on:
       kernel_version:
         description: "Select kernel version"
         required: false
-        default: "6.6.y_6.12.y"
+        default: "6.12.y"
         type: choice
         options:
           - 5.4.y
@@ -27,9 +27,9 @@ on:
           - 5.15.y
           - 6.1.y
           - 6.6.y
+          - 6.12.y
           - 6.13.y
           - 6.14.y
-          - 6.12.y
           - 6.1.66
           - 5.4.y_5.10.y
           - 5.15.y_6.1.y
@@ -56,13 +56,13 @@ on:
         default: "-Hj"
         type: string
       kernel_config:
-        default: "kernel-config/release/s905x4"
+        default: "kernel-config/release/general"
         type: choice
         options:
           - kernel-config/release/s905x4
           - kernel-config/release/general
           - kernel-config/release/DBAI
-          - false
+          - "false"
       kernel_mu:
         default: "s905x4"
         type: choice
@@ -70,10 +70,14 @@ on:
 
 env:
   TZ: Asia/Jakarta
+  PACKAGED_OUTPUTPATH: /builder/output
 
 jobs:
   build:
     runs-on: ubuntu-22.04-arm
+    permissions:
+      contents: write
+      packages: write
     if: ${{ github.event.repository.owner.id == github.event.sender.id }}
 
     steps:
@@ -83,9 +87,9 @@ jobs:
       - name: Initialization environment
         id: init
         run: |
-          docker rmi $(docker images -q) 2>/dev/null
-          sudo swapoff -a
-          sudo rm -rf /usr/share/dotnet /mnt/swapfile /root/.cargo ~/.rustup
+          docker rmi $(docker images -q) 2>/dev/null || true
+          sudo swapoff -a || true
+          sudo rm -rf /usr/share/dotnet /mnt/swapfile /root/.cargo ~/.rustup 2>/dev/null || true
           sudo -E apt-get update
           sudo -E apt-get -y install $(curl -fsSL https://tinyurl.com/ubuntu2204-build-armbian)
           sudo timedatectl set-timezone "${TZ}"
@@ -155,11 +159,21 @@ jobs:
           compress_format: ${{ inputs.compress_format }}
           silent_log: true
 
+      - name: Check output files
+        id: check_output
+        run: |
+          if [ -n "$(ls -A /builder/output 2>/dev/null)" ]; then
+            echo "has_files=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_files=false" >> $GITHUB_OUTPUT
+            echo "::warning::Folder /builder/output kosong! Hasil kompilasi tidak ditemukan."
+          fi
+
       - name: Dump Kernel Config Preview
         if: always()
         run: |
           echo "===== Kernel .config ====="
-          cat /builder/kernel/.config || echo "No .config file found"
+          cat /builder/kernel/.config 2>/dev/null || echo "No .config file found"
 
       - name: Upload Build Log (build.log)
         if: always()
@@ -169,8 +183,8 @@ jobs:
           path: /builder/output/build.log
 
       - name: Upload Kernel to Release
-        uses: ncipollo/release-action@main
-        if: ${{ env.PACKAGED_STATUS == 'success' && !cancelled() }}
+        uses: ncipollo/release-action@v1
+        if: ${{ steps.check_output.outputs.has_files == 'true' && !cancelled() }}
         with:
           tag: kernel_${{ inputs.kernel_mu }}
           artifacts: ${{ env.PACKAGED_OUTPUTPATH }}/*
