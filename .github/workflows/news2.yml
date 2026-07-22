@@ -1,4 +1,8 @@
-name: Compile kernel v2
+#==========================================================================
+# Description: Compile kernel v2
+#==========================================================================
+
+name: Compile Kernel v2
 
 on:
   workflow_dispatch:
@@ -35,27 +39,41 @@ on:
           - 5.15.y_6.1.y
           - 6.6.y_6.12.y
       kernel_auto:
+        description: "Auto use the latest kernel"
+        required: false
         default: true
         type: boolean
       delete_source:
+        description: "Delete the source after compilation"
+        required: false
         default: true
         type: boolean
       kernel_package:
+        description: "Select compile package list"
+        required: false
         default: "all"
         type: choice
         options: [all, dtbs]
       kernel_toolchain:
+        description: "Select the compilation toolchain"
+        required: false
         default: "gcc"
         type: choice
         options: [clang, gcc, gcc-14.2]
       compress_format:
+        description: "Set the initrd compression format"
+        required: false
         default: "xz"
         type: choice
         options: [xz, gzip, zstd, lzma]
       kernel_sign:
+        description: "Set the kernel custom signature"
+        required: false
         default: "-Hj"
         type: string
       kernel_config:
+        description: "Set the path of kernel .config"
+        required: false
         default: "kernel-config/release/general"
         type: choice
         options:
@@ -64,6 +82,8 @@ on:
           - kernel-config/release/DBAI
           - "false"
       kernel_mu:
+        description: "Select kernel tag designation"
+        required: false
         default: "s905x4"
         type: choice
         options: [s905x4, stable, dev, beta, dtb]
@@ -74,32 +94,42 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04-arm
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
       packages: write
-    if: ${{ github.event.repository.owner.id == github.event.sender.id }}
+    if: github.event.repository.owner.id == github.event.sender.id
 
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Initialization environment
+      - name: Initialization Environment
         id: init
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
           docker rmi $(docker images -q) 2>/dev/null || true
-          sudo swapoff -a || true
+          [[ -n "${AGENT_TOOLSDIRECTORY}" ]] && sudo rm -rf "${AGENT_TOOLSDIRECTORY}" || true
           sudo rm -rf /usr/share/dotnet /mnt/swapfile /root/.cargo ~/.rustup 2>/dev/null || true
+          sudo swapoff -a || true
           sudo -E apt-get update
-          sudo -E apt-get -y install $(curl -fsSL https://tinyurl.com/ubuntu2204-build-armbian)
+          
+          BUILD_PACKAGES=$(curl -fsSL https://tinyurl.com/ubuntu2204-build-armbian)
+          sudo -E apt-get -y install ${BUILD_PACKAGES}
+          
           sudo timedatectl set-timezone "${TZ}"
           echo "status=success" >> ${GITHUB_OUTPUT}
 
-      - name: Create simulated physical disk
+      - name: Create Simulated Physical Disk (LVM)
         id: disk
         run: |
-          mnt_size=$(expr $(df -h /mnt | tail -1 | awk '{print $4}' | sed 's/[a-zA-Z]*//g' | cut -d. -f1) - 1)
-          root_size=$(expr $(df -h / | tail -1 | awk '{print $4}' | sed 's/[a-zA-Z]*//g' | cut -d. -f1) - 4)
+          mnt_size=$(expr $(df -h /mnt | tail -1 | awk '{print $4}' | sed 's/[a-zA-Z]*//g' | cut -d. -f1) - 1 2>/dev/null || echo 15)
+          root_size=$(expr $(df -h / | tail -1 | awk '{print $4}' | sed 's/[a-zA-Z]*//g' | cut -d. -f1) - 4 2>/dev/null || echo 15)
+          
+          [ "$mnt_size" -le 0 ] && mnt_size=10
+          [ "$root_size" -le 0 ] && root_size=10
+
           sudo truncate -s "${mnt_size}"G /mnt/mnt.img
           sudo truncate -s "${root_size}"G /root.img
           sudo losetup /dev/loop6 /mnt/mnt.img
@@ -111,14 +141,24 @@ jobs:
           sudo mkfs.xfs /dev/github/runner
           sudo mkdir -p /builder
           sudo mount /dev/github/runner /builder
-          sudo chown -R runner.runner /builder
+          sudo chown -R runner:runner /builder
           df -Th
 
-      - name: Create a mapped directory
+      - name: Create Mapped Directory
         id: mapped
         working-directory: /builder
         run: |
           mkdir -p /builder/{kernel,output}
+          
+          ACTION_DIR=$(find /home/runner/work/_actions -type d -path "*/Dirgha80/amlogic-s9xxx-armbian/*/compile-kernel" | head -n 1)
+          if [ -z "$ACTION_DIR" ]; then
+            ACTION_DIR="/home/runner/work/_actions/Dirgha80/amlogic-s9xxx-armbian/main/compile-kernel"
+            mkdir -p "$ACTION_DIR"
+          fi
+
+          ln -sf /builder/kernel "$ACTION_DIR/kernel"
+          ln -sf /builder/output "$ACTION_DIR/output"
+          
           ln -sf /builder/kernel $GITHUB_WORKSPACE/kernel
           ln -sf /builder/output $GITHUB_WORKSPACE/output
           echo "status=success" >> ${GITHUB_OUTPUT}
@@ -130,40 +170,43 @@ jobs:
             exit 1
           fi
 
+      - name: Compile the Kernel [${{ inputs.kernel_version }}]
+        uses: Dirgha80/amlogic-s9xxx-armbian@main
+        if: steps.mapped.outputs.status == 'success' && !cancelled()
+        with:
+          build_target: kernel
+          kernel_source: ${{ inputs.kernel_source || 'tes-rep' }}
+          kernel_version: ${{ inputs.kernel_version || '6.12.y' }}
+          kernel_auto: ${{ inputs.kernel_auto || true }}
+          delete_source: ${{ inputs.delete_source || true }}
+          kernel_package: ${{ inputs.kernel_package || 'all' }}
+          kernel_toolchain: ${{ inputs.kernel_toolchain || 'gcc' }}
+          kernel_sign: ${{ inputs.kernel_sign || '-Hj' }}
+          kernel_config: ${{ inputs.kernel_config || 'kernel-config/release/general' }}
+          compress_format: ${{ inputs.compress_format || 'xz' }}
+          silent_log: true
+
       - name: Apply Custom Patches (if any)
         run: |
-          PATCH_DIR="patches/${{ inputs.kernel_version }}"
-          if [ -d "$PATCH_DIR" ]; then
+          PATCH_DIR="${GITHUB_WORKSPACE}/patches/${{ inputs.kernel_version }}"
+          if [ -d "$PATCH_DIR" ] && [ -d "/builder/kernel" ]; then
             echo "📦 Found patches in $PATCH_DIR"
             for patch in "$PATCH_DIR"/*.patch; do
-              echo "➡️  Applying $patch"
+              [ -e "$patch" ] || continue
+              echo "➡️ Applying $patch"
               patch -d /builder/kernel -p1 < "$patch" || { echo "❌ Failed patch: $patch"; exit 1; }
             done
           else
-            echo "ℹ️ No patch folder for version: ${{ inputs.kernel_version }}"
+            echo "ℹ️ No patch folder or kernel directory not available for patching."
           fi
 
-      - name: Compile the kernel [${{ inputs.kernel_version }}]
-        uses: Dirgha80/amlogic-s9xxx-armbian@main
-        if: ${{ steps.mapped.outputs.status == 'success' && !cancelled() }}
-        with:
-          build_target: kernel
-          kernel_source: ${{ inputs.kernel_source }}
-          kernel_version: ${{ inputs.kernel_version }}
-          kernel_auto: ${{ inputs.kernel_auto }}
-          delete_source: ${{ inputs.delete_source }}
-          kernel_package: ${{ inputs.kernel_package }}
-          kernel_toolchain: ${{ inputs.kernel_toolchain }}
-          kernel_sign: ${{ inputs.kernel_sign }}
-          kernel_config: ${{ inputs.kernel_config }}
-          compress_format: ${{ inputs.compress_format }}
-          silent_log: true
-
-      - name: Check output files
+      - name: Check Output Files
         id: check_output
         run: |
           if [ -n "$(ls -A /builder/output 2>/dev/null)" ]; then
             echo "has_files=true" >> $GITHUB_OUTPUT
+            echo "Build output files found:"
+            ls -lh /builder/output
           else
             echo "has_files=false" >> $GITHUB_OUTPUT
             echo "::warning::Folder /builder/output kosong! Hasil kompilasi tidak ditemukan."
@@ -172,35 +215,37 @@ jobs:
       - name: Dump Kernel Config Preview
         if: always()
         run: |
-          echo "===== Kernel .config ====="
+          echo "===== Kernel .config Preview ====="
           cat /builder/kernel/.config 2>/dev/null || echo "No .config file found"
 
-      - name: Upload Build Log (build.log)
+      - name: Upload Build Log
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-log-${{ inputs.kernel_version }}
-          path: /builder/output/build.log
+          path: /builder/output/*.log
+          if-no-files-found: ignore
 
       - name: Upload Kernel to Release
         uses: ncipollo/release-action@v1
-        if: ${{ steps.check_output.outputs.has_files == 'true' && !cancelled() }}
+        if: steps.check_output.outputs.has_files == 'true' && !cancelled()
         with:
           tag: kernel_${{ inputs.kernel_mu }}
           artifacts: ${{ env.PACKAGED_OUTPUTPATH }}/*
           allowUpdates: true
           token: ${{ secrets.GITHUB_TOKEN }}
           body: |
-            - Kernel built from: `${{ inputs.kernel_source }}`
-            - Version: `${{ inputs.kernel_version }}`
-            - Toolchain: `${{ inputs.kernel_toolchain }}`
-            - Config: `${{ inputs.kernel_config }}`
-            - Signature: `${{ inputs.kernel_sign }}`
-            - This is a `${{ inputs.kernel_mu }}` kernel build
+            ### Kernel Build Summary
+            - **Kernel Source:** `${{ inputs.kernel_source }}`
+            - **Version:** `${{ inputs.kernel_version }}`
+            - **Toolchain:** `${{ inputs.kernel_toolchain }}`
+            - **Config:** `${{ inputs.kernel_config }}`
+            - **Signature:** `${{ inputs.kernel_sign }}`
+            - **Tag Designation:** `${{ inputs.kernel_mu }}`
 
       - name: Cleanup Loop Devices and Mounts
         if: always()
         run: |
-          sudo umount /builder || true
-          sudo vgremove -f github || true
-          sudo losetup -D || true
+          sudo umount /builder 2>/dev/null || true
+          sudo vgremove -f github 2>/dev/null || true
+          sudo losetup -D 2>/dev/null || true
