@@ -104,6 +104,11 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Set up QEMU for ARM64 Emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
       - name: Initialization Environment
         id: init
         env:
@@ -115,9 +120,9 @@ jobs:
           sudo swapoff -a || true
           sudo -E apt-get update
           
-          # Install QEMU & binfmt pendukung emulasi ARM64 untuk mengatasi Exec format error
+          # Fix 'Exec format error' dengan meregistrasikan binfmt_misc secara mutlak
           sudo -E apt-get install -y qemu-user-static binfmt-support
-          sudo update-binfmts --enable qemu-aarch64
+          sudo docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
           
           BUILD_PACKAGES=$(curl -fsSL https://tinyurl.com/ubuntu2204-build-armbian)
           sudo -E apt-get -y install ${BUILD_PACKAGES}
@@ -174,6 +179,24 @@ jobs:
             exit 1
           fi
 
+      # ----------------------------------------------------------------------
+      # Catatan: Jika source kernel di-clone oleh action Dirgha80 secara otomatis,
+      # patch kustom ini ditaruh tepat jika source sudah tersedia di /builder/kernel.
+      # ----------------------------------------------------------------------
+      - name: Apply Custom Patches (if source exists)
+        run: |
+          PATCH_DIR="${GITHUB_WORKSPACE}/patches/${{ inputs.kernel_version }}"
+          if [ -d "$PATCH_DIR" ] && [ -d "/builder/kernel" ] && [ -n "$(ls -A /builder/kernel 2>/dev/null)" ]; then
+            echo "📦 Found patches in $PATCH_DIR"
+            for patch in "$PATCH_DIR"/*.patch; do
+              [ -e "$patch" ] || continue
+              echo "➡️ Applying $patch"
+              patch -d /builder/kernel -p1 < "$patch" || { echo "❌ Failed patch: $patch"; exit 1; }
+            done
+          else
+            echo "ℹ️ No patches applied at this stage (directory empty or no patch found)."
+          fi
+
       - name: Compile the Kernel [${{ inputs.kernel_version }}]
         uses: Dirgha80/amlogic-s9xxx-armbian@main
         if: steps.mapped.outputs.status == 'success' && !cancelled()
@@ -189,20 +212,6 @@ jobs:
           kernel_config: ${{ inputs.kernel_config || 'kernel-config/release/general' }}
           compress_format: ${{ inputs.compress_format || 'xz' }}
           silent_log: true
-
-      - name: Apply Custom Patches (if any)
-        run: |
-          PATCH_DIR="${GITHUB_WORKSPACE}/patches/${{ inputs.kernel_version }}"
-          if [ -d "$PATCH_DIR" ] && [ -d "/builder/kernel" ]; then
-            echo "📦 Found patches in $PATCH_DIR"
-            for patch in "$PATCH_DIR"/*.patch; do
-              [ -e "$patch" ] || continue
-              echo "➡️ Applying $patch"
-              patch -d /builder/kernel -p1 < "$patch" || { echo "❌ Failed patch: $patch"; exit 1; }
-            done
-          else
-            echo "ℹ️ No patch folder or kernel directory not available for patching."
-          fi
 
       - name: Check Output Files
         id: check_output
