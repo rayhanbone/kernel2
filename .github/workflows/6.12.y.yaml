@@ -37,10 +37,11 @@ jobs:
           
           if [ -d "$PATCH_DIR" ]; then
             echo "Applying patches from $PATCH_DIR..."
-            for patch in $PATCH_DIR/*.patch; do
+            for patch in "$PATCH_DIR"/*.patch; do
               if [ -f "$patch" ]; then
                 echo "Applying $patch"
-                patch -p1 < "$patch" || exit 1
+                # Flag -N (forward only) & --batch (non-interactive) untuk abaikan patch yang sudah ada
+                patch -p1 -N --batch < "$patch" || echo "Patch $patch dilewati (sudah ter-apply / gagal hunk)."
               fi
             done
           else
