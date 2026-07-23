@@ -123,8 +123,19 @@ jobs:
           sudo systemctl start docker || true
           docker info
 
+      - name: Create a mapped directory
+        id: mapped
+        run: |
+          sudo mkdir -p /builder/{kernel,output}
+          sudo mkdir -p /home/runner/work/_actions/ophub/amlogic-s9xxx-armbian/main/compile-kernel
+          sudo ln -sf /builder/kernel /home/runner/work/_actions/ophub/amlogic-s9xxx-armbian/main/compile-kernel/kernel
+          sudo ln -sf /builder/output /home/runner/work/_actions/ophub/amlogic-s9xxx-armbian/main/compile-kernel/output
+          sudo chown -R runner:runner /builder
+          echo "status=success" >> ${GITHUB_OUTPUT}
+
       - name: Compile the kernel [ ${{ inputs.kernel_version }} ]
         uses: ophub/amlogic-s9xxx-armbian@main
+        if: steps.mapped.outputs.status == 'success' && !cancelled()
         with:
           build_target: kernel
           kernel_source: ${{ inputs.kernel_source || 'unifreq' }}
