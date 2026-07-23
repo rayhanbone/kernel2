@@ -1,131 +1,188 @@
-name: Build Linux 6.12.y Kernel
+#==========================================================================
+# Description: Compile release general kernel
+# Copyright (C) 2021 https://github.com/unifreq/openwrt_packit
+# Copyright (C) 2021 https://github.com/ophub/kernel
+#==========================================================================
+
+name: Compile General Kernel
 
 on:
-  workflow_dispatch: # Memungkinkan build dipicu secara manual dari tab Actions
+  repository_dispatch:
+  workflow_dispatch:
+    inputs:
+      kernel_source:
+        description: "Select the kernel source"
+        required: false
+        default: "rayhanbone"
+        type: choice
+        options:
+          - rayhanbone
+          - unifreq
+          - codesnas
+          - Dirgha80
+          - Houjie80
+      kernel_version:
+        description: "Select kernel version"
+        required: false
+        default: "6.12.y"
+        type: choice
+        options:
+          - 5.4.y
+          - 5.10.y
+          - 5.15.y
+          - 6.1.y
+          - 6.6.y
+          - 6.14.y
+          - 6.12.y
+          - 5.4.y_5.10.y
+          - 5.15.y_6.1.y
+          - 6.6.y_6.12.y
+      kernel_auto:
+        description: "Auto use the latest kernel"
+        required: false
+        default: true
+        type: boolean
+      kernel_package:
+        description: "Select compile package list"
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - all
+          - dtbs
+      kernel_toolchain:
+        description: "Select the compilation toolchain"
+        required: false
+        default: "gcc"
+        type: choice
+        options:
+          - clang
+          - gcc
+          - gcc-11.3
+          - gcc-12.2
+          - gcc-12.3
+          - gcc-13.2
+          - gcc-13.3
+      compress_format:
+        description: "Set the initrd compression format"
+        required: false
+        default: "xz"
+        type: choice
+        options:
+          - xz
+          - gzip
+          - zstd
+          - lzma
+      kernel_sign:
+        description: "Set the kernel custom signature"
+        required: false
+        default: "-reyre"
+        type: string
+      kernel_config:
+        description: "Set the path of kernel .config"
+        required: false
+        default: "kernel-config/release/DBAI"
+        type: choice
+        options:
+          - kernel-config/release/DBAI
+          - kernel-config/release/general
+          - "false"
+
+env:
+  TZ: Asia/Jakarta
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    if: github.event.repository.owner.id == github.event.sender.id
 
     steps:
-      - name: Checkout Workflow Repository
+      - name: Checkout Workspace
         uses: actions/checkout@v4
 
-      - name: Install Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential libncurses-dev bison flex libssl-dev libelf-dev \
-            bc git wget curl ccache u-boot-tools crossbuild-essential-arm64 \
-            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu device-tree-compiler xz-utils
-
-      - name: Clone Linux Kernel Source
-        run: |
-          git clone --depth 1 -b main https://github.com/rayhanbone/linux-6.12.y.git linux-src
-
-      - name: Fetch Kernel Patch & Config from kernel2 Repository
-        run: |
-          git clone --depth 1 -b main https://github.com/rayhanbone/kernel2.git kernel2-repo
-          
-          # Salin config-6.12 ke direktori kernel source
-          cp kernel2-repo/kernel-config/release/DBAI/config-6.12 linux-src/.config
-
-      - name: Apply Kernel Patches Safe Mode
-        run: |
-          cd linux-src
-          PATCH_DIR="../kernel2-repo/kernel-patch/beta/linux-6.12.y"
-          
-          if [ -d "$PATCH_DIR" ]; then
-            echo "Applying patches from $PATCH_DIR..."
-            
-            # Nonaktifkan mode strict bash (errexit) agar error/warning pada patch diabaikan
-            set +e
-            
-            for patch in "$PATCH_DIR"/*.patch; do
-              if [ -f "$patch" ]; then
-                echo "------------------------------------------"
-                echo "Processing patch: $(basename "$patch")"
-                echo "------------------------------------------"
-                
-                # Menggunakan git apply yang pintar menangani whitespace/malformed patch
-                git apply --reject --whitespace=fix "$patch" 2>/dev/null
-                
-                if [ $? -eq 0 ]; then
-                  echo "RESULT: Patch $(basename "$patch") applied cleanly."
-                else
-                  # Fallback ke patch standar jika git apply tidak berhasil, tanpa membatalkan runner
-                  patch -p1 --ignore-whitespace --fuzz=3 -f < "$patch" 2>/dev/null || true
-                  echo "RESULT: Patch $(basename "$patch") processed with fallback/skipped safely."
-                fi
-              fi
-            done
-            
-            # Kembalikan mode strict bash
-            set -e
-          else
-            echo "Directory patch $PATCH_DIR tidak ditemukan, melewati proses patching."
-          fi
-
-      - name: Prepare Kernel Configuration
-        run: |
-          cd linux-src
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          make olddefconfig
-
-      - name: Compile Kernel Image & Modules
-        run: |
-          cd linux-src
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          
-          make -j$(nproc) Image dtbs modules
-
-      - name: Prepare Artifacts Package
-        run: |
-          cd linux-src
-          mkdir -p ../output/boot
-          
-          # Salin Kernel Image
-          cp arch/arm64/boot/Image ../output/boot/
-          
-          # Salin Device Tree Blobs (DTB)
-          cp -r arch/arm64/boot/dts/amlogic ../output/boot/ 2>/dev/null || true
-          cp -r arch/arm64/boot/dts/rockchip ../output/boot/ 2>/dev/null || true
-          
-          # Install modul ke folder output
-          mkdir -p ../output/modules
-          make INSTALL_MOD_PATH=../output/modules modules_install
-          
-          # Informasi versi kernel & tanggal build
-          KERNEL_VER=$(make kernelrelease)
-          BUILD_DATE=$(date +'%Y.%m.%d-%H%M')
-          
-          # Penandaan Sign -reyre & Format File .tar.xz
-          ARCHIVE_NAME="kernel-6.12.y-${KERNEL_VER}-${BUILD_DATE}-reyre.tar.xz"
-          
-          echo "KERNEL_VER=$KERNEL_VER" >> $GITHUB_ENV
-          echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
-          echo "ARCHIVE_NAME=$ARCHIVE_NAME" >> $GITHUB_ENV
-          
-          # Kompres output menjadi format tar.xz
-          cd ../
-          TAR_OPTIONS="--xz" tar -cvf "$ARCHIVE_NAME" -C output .
-
-      - name: Create or Update Release 6.12.y
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: "6.12.y"
-          name: "Kernel Linux 6.12.y (reyre)"
-          body: |
-            ## Automated Build Kernel Linux 6.12.y
-            * **Signed By:** reyre
-            * **Kernel Version:** ${{ env.KERNEL_VER }}
-            * **Last Build Date:** ${{ env.BUILD_DATE }}
-            * **Config:** `config-6.12`
-            * **Patch Source:** `kernel-patch/beta/linux-6.12.y`
-          files: |
-            ${{ env.ARCHIVE_NAME }}
-          make_latest: true
+      - name: Initialization environment
+        id: init
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          docker rmi $(docker images -q) 2>/dev/null || true
+          [[ -n "${AGENT_TOOLSDIRECTORY}" ]] && sudo rm -rf "${AGENT_TOOLSDIRECTORY}"
+          sudo rm -rf /usr/share/dotnet /etc/apt/sources.list.d /usr/local/lib/android 2>/dev/null
+          sudo swapoff -a
+          sudo rm -f /swapfile /mnt/swapfile
+          sudo -E apt-get -y update
+          sudo -E apt-get -y purge azure-cli ghc* zulu* llvm* firefox google* dotnet* powershell openjdk* mongodb* moby* || true
+          sudo -E apt-get -y install $(curl -fsSL https://tinyurl.com/ubuntu2204-build-armbian)
+          sudo -E systemctl daemon-reload
+          sudo -E apt-get -y autoremove --purge
+          sudo -E apt-get clean
+          sudo sed -i '/NVM_DIR/d;/skel/d' /root/{.bashrc,.profile} 2>/dev/null || true
+          sudo rm -rf ~/{.cargo,.dotnet,.rustup}
+          sudo timedatectl set-timezone "${TZ}"
+          echo "status=success" >> ${GITHUB_OUTPUT}
+
+      - name: Create simulated physical disk
+        id: disk
+        run: |
+          mnt_size=$(expr $(df -h /mnt | tail -1 | awk '{print $4}' | sed 's/[[:alpha:]]//g' | sed 's/\..*//') - 1)
+          root_size=$(expr $(df -h / | tail -1 | awk '{print $4}' | sed 's/[[:alpha:]]//g' | sed 's/\..*//') - 4)
+          sudo truncate -s "${mnt_size}"G /mnt/mnt.img
+          sudo truncate -s "${root_size}"G /root.img
+          sudo losetup /dev/loop6 /mnt/mnt.img
+          sudo losetup /dev/loop7 /root.img
+          sudo pvcreate /dev/loop6
+          sudo pvcreate /dev/loop7
+          sudo vgcreate github /dev/loop6 /dev/loop7
+          sudo lvcreate -n runner -l 100%FREE github
+          sudo mkfs.xfs /dev/github/runner
+          sudo mkdir -p /builder
+          sudo mount /dev/github/runner /builder
+          sudo chown -R runner:runner /builder
+          df -Th
+
+      - name: Create a mapped directory
+        id: mapped
+        working-directory: /builder
+        run: |
+          df -hT ${PWD}
+          mkdir -p /builder/{kernel,output}
+          mkdir -p ${GITHUB_WORKSPACE}/.github/actions/compile-kernel
+          ln -sf /builder/kernel ${GITHUB_WORKSPACE}/.github/actions/compile-kernel/kernel
+          ln -sf /builder/output ${GITHUB_WORKSPACE}/.github/actions/compile-kernel/output
+          echo "status=success" >> ${GITHUB_OUTPUT}
+
+      - name: Compile the kernel [ ${{ inputs.kernel_version }} ]
+        uses: ophub/amlogic-s9xxx-armbian@main
+        if: steps.mapped.outputs.status == 'success' && !cancelled()
+        with:
+          build_target: kernel
+          kernel_source: ${{ inputs.kernel_source || 'rayhanbone' }}
+          kernel_version: ${{ inputs.kernel_version || '6.12.y' }}
+          kernel_auto: ${{ inputs.kernel_auto || true }}
+          kernel_package: ${{ inputs.kernel_package || 'all' }}
+          kernel_toolchain: ${{ inputs.kernel_toolchain || 'gcc' }}
+          kernel_sign: ${{ inputs.kernel_sign || '-reyre' }}
+          kernel_config: ${{ inputs.kernel_config || 'kernel-config/release/DBAI' }}
+          compress_format: ${{ inputs.compress_format || 'xz' }}
+
+      - name: Upload Kernel to Release
+        uses: ncipollo/release-action@v1
+        if: env.PACKAGED_STATUS == 'success' && !cancelled()
+        with:
+          tag: ${{ inputs.kernel_source }}_${{ inputs.kernel_version }}
+          artifacts: ${{ env.PACKAGED_OUTPUTPATH }}/*
+          allowUpdates: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          body: |
+            ### Kernel Build Details
+            - **Source:** `${{ inputs.kernel_source }}`
+            - **Version:** `${{ inputs.kernel_version }}`
+            - **Toolchain:** `${{ inputs.kernel_toolchain }}`
+            - **Signature:** `${{ inputs.kernel_sign }}`
+            - **Compress Format:** `${{ inputs.compress_format }}`
+
+            ---
+            * **Kernel Source Repository:** https://github.com/rayhanbone/linux-6.12.y
+            * **Workflow Source:** https://github.com/rayhanbone/kernel2/blob/main/.github/workflows/6.12.y.yml
+            * **Patch Directory:** https://github.com/rayhanbone/kernel2/tree/main/kernel-patch/beta/linux-6.12.y
+            * **Config File:** https://github.com/rayhanbone/kernel2/blob/main/kernel-config/release/DBAI/config-6.12
