@@ -1,0 +1,106 @@
+name: Build Linux 6.12.y Kernel
+
+on:
+  workflow_dispatch: # Jalankan manual lewat tab Actions
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Workflow Repository
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential libncurses-dev bison flex libssl-dev libelf-dev \
+            bc git wget curl ccache u-boot-tools crossbuild-essential-arm64 \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu device-tree-compiler
+
+      - name: Clone Linux Kernel Source
+        run: |
+          git clone --depth 1 -b main https://github.com/rayhanbone/linux-6.12.y.git linux-src
+
+      - name: Fetch Kernel Patch & Config from kernel2 Repository
+        run: |
+          git clone --depth 1 -b main https://github.com/rayhanbone/kernel2.git kernel2-repo
+          
+          # Salin config-6.12 ke direktori kernel source
+          cp kernel2-repo/kernel-config/release/general/config-6.12 linux-src/.config
+
+      - name: Apply Kernel Patches
+        run: |
+          cd linux-src
+          PATCH_DIR="../kernel2-repo/kernel-patch/beta/linux-6.12.y"
+          
+          if [ -d "$PATCH_DIR" ]; then
+            echo "Applying patches from $PATCH_DIR..."
+            for patch in $PATCH_DIR/*.patch; do
+              if [ -f "$patch" ]; then
+                echo "Applying $patch"
+                patch -p1 < "$patch" || exit 1
+              fi
+            done
+          else
+            echo "Directory patch $PATCH_DIR tidak ditemukan, melewati proses patching."
+          fi
+
+      - name: Prepare Kernel Configuration
+        run: |
+          cd linux-src
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          make olddefconfig
+
+      - name: Compile Kernel Image & Modules
+        run: |
+          cd linux-src
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          
+          make -j$(nproc) Image dtbs modules
+
+      - name: Prepare Artifacts Package
+        run: |
+          cd linux-src
+          mkdir -p ../output/boot
+          
+          # Salin Kernel Image
+          cp arch/arm64/boot/Image ../output/boot/
+          
+          # Salin Device Tree Blobs (DTB)
+          cp -r arch/arm64/boot/dts/amlogic ../output/boot/ 2>/dev/null || true
+          cp -r arch/arm64/boot/dts/rockchip ../output/boot/ 2>/dev/null || true
+          
+          # Install modul ke folder output
+          mkdir -p ../output/modules
+          make INSTALL_MOD_PATH=../output/modules modules_install
+          
+          # Dapatkan versi kernel & format tanggal untuk Release Tag
+          KERNEL_VER=$(make kernelrelease)
+          BUILD_DATE=$(date +'%Y.%m.%d-%H%M')
+          
+          echo "KERNEL_VER=$KERNEL_VER" >> $GITHUB_ENV
+          echo "RELEASE_TAG=v${KERNEL_VER}-${BUILD_DATE}" >> $GITHUB_ENV
+          
+          # Kompres output menjadi tar.gz agar mudah di-download di Release
+          cd ../
+          tar -czvf "kernel-6.12.y-${KERNEL_VER}.tar.gz" -C output .
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: "Kernel 6.12.y Release (${{ env.KERNEL_VER }})"
+          body: |
+            ## Automated Build Kernel Linux 6.12.y
+            * **Kernel Version:** ${{ env.KERNEL_VER }}
+            * **Build Date:** ${{ github.event.repository.updated_at }}
+            * **Config:** `config-6.12`
+            * **Patch Source:** `kernel-patch/beta/linux-6.12.y`
+          files: |
+            kernel-6.12.y-*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
