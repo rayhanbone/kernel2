@@ -1,7 +1,7 @@
 name: Build Linux 6.12.y Kernel
 
 on:
-  workflow_dispatch: # Jalankan manual lewat tab Actions
+  workflow_dispatch: # Memungkinkan build dipicu secara manual dari tab Actions
 
 jobs:
   build:
@@ -40,8 +40,10 @@ jobs:
             for patch in "$PATCH_DIR"/*.patch; do
               if [ -f "$patch" ]; then
                 echo "Applying $patch"
-                # Flag -N (forward only) & --batch (non-interactive) untuk abaikan patch yang sudah ada
-                patch -p1 -N --batch < "$patch" || echo "Patch $patch dilewati (sudah ter-apply / gagal hunk)."
+                # -N (--forward): Mencegah patch berulang/reversed
+                # --batch: Non-interaktif (mencegah prompt y/n)
+                # || echo: Mencegah workflow terhenti jika terjadi hunk fail/skip
+                patch -p1 -N --batch < "$patch" || echo "Warning: Sebagian atau seluruh patch $patch dilewati."
               fi
             done
           else
@@ -79,7 +81,7 @@ jobs:
           mkdir -p ../output/modules
           make INSTALL_MOD_PATH=../output/modules modules_install
           
-          # Dapatkan versi kernel & tanggal build
+          # Informasi versi kernel & tanggal build
           KERNEL_VER=$(make kernelrelease)
           BUILD_DATE=$(date +'%Y.%m.%d-%H%M')
           
@@ -90,9 +92,9 @@ jobs:
           echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
           echo "ARCHIVE_NAME=$ARCHIVE_NAME" >> $GITHUB_ENV
           
-          # Kompres output menjadi format tar.xz
+          # Kompres output menjadi format tar.xz (menggunakan xz compression)
           cd ../
-          tar -cJf "$ARCHIVE_NAME" -C output .
+          TAR_OPTIONS="--xz" tar -cvf "$ARCHIVE_NAME" -C output .
 
       - name: Create or Update Release 6.12.y
         uses: softprops/action-gh-release@v2
