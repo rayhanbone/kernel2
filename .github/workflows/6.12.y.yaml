@@ -30,7 +30,7 @@ jobs:
           # Salin config-6.12 ke direktori kernel source
           cp kernel2-repo/kernel-config/release/general/config-6.12 linux-src/.config
 
-      - name: Apply Kernel Patches
+      - name: Apply Kernel Patches Safe Mode
         run: |
           cd linux-src
           PATCH_DIR="../kernel2-repo/kernel-patch/beta/linux-6.12.y"
@@ -39,11 +39,11 @@ jobs:
             echo "Applying patches from $PATCH_DIR..."
             for patch in "$PATCH_DIR"/*.patch; do
               if [ -f "$patch" ]; then
-                echo "Applying $patch"
-                # -N (--forward): Mencegah patch berulang/reversed
-                # --batch: Non-interaktif (mencegah prompt y/n)
-                # || echo: Mencegah workflow terhenti jika terjadi hunk fail/skip
-                patch -p1 -N --batch < "$patch" || echo "Warning: Sebagian atau seluruh patch $patch dilewati."
+                echo "Processing patch: $patch"
+                # -N (--forward): Abaikan patch yang sudah ada / reversed
+                # --batch: Jalankan non-interaktif tanpa prompt y/n
+                # || true: Paksa agar bash mengabaikan exit code error jika patch dilewati
+                patch -p1 -N --batch < "$patch" || true
               fi
             done
           else
@@ -92,7 +92,7 @@ jobs:
           echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
           echo "ARCHIVE_NAME=$ARCHIVE_NAME" >> $GITHUB_ENV
           
-          # Kompres output menjadi format tar.xz (menggunakan xz compression)
+          # Kompres output menjadi format tar.xz
           cd ../
           TAR_OPTIONS="--xz" tar -cvf "$ARCHIVE_NAME" -C output .
 
