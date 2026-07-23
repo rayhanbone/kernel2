@@ -115,6 +115,10 @@ jobs:
           sudo swapoff -a || true
           sudo -E apt-get update
           
+          # Install QEMU & binfmt pendukung emulasi ARM64 untuk mengatasi Exec format error
+          sudo -E apt-get install -y qemu-user-static binfmt-support
+          sudo update-binfmts --enable qemu-aarch64
+          
           BUILD_PACKAGES=$(curl -fsSL https://tinyurl.com/ubuntu2204-build-armbian)
           sudo -E apt-get -y install ${BUILD_PACKAGES}
           
