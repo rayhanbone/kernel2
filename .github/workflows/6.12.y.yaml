@@ -17,7 +17,7 @@ jobs:
           sudo apt-get install -y \
             build-essential libncurses-dev bison flex libssl-dev libelf-dev \
             bc git wget curl ccache u-boot-tools crossbuild-essential-arm64 \
-            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu device-tree-compiler
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu device-tree-compiler xz-utils
 
       - name: Clone Linux Kernel Source
         run: |
@@ -78,29 +78,35 @@ jobs:
           mkdir -p ../output/modules
           make INSTALL_MOD_PATH=../output/modules modules_install
           
-          # Dapatkan versi kernel & format tanggal untuk Release Tag
+          # Dapatkan versi kernel & format tanggal untuk Release Tag + Sign -reyre
           KERNEL_VER=$(make kernelrelease)
           BUILD_DATE=$(date +'%Y.%m.%d-%H%M')
           
-          echo "KERNEL_VER=$KERNEL_VER" >> $GITHUB_ENV
-          echo "RELEASE_TAG=v${KERNEL_VER}-${BUILD_DATE}" >> $GITHUB_ENV
+          # Penandaan Sign -reyre
+          RELEASE_TAG="v${KERNEL_VER}-${BUILD_DATE}-reyre"
+          ARCHIVE_NAME="kernel-6.12.y-${KERNEL_VER}-reyre.tar.xz"
           
-          # Kompres output menjadi tar.gz agar mudah di-download di Release
+          echo "KERNEL_VER=$KERNEL_VER" >> $GITHUB_ENV
+          echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
+          echo "ARCHIVE_NAME=$ARCHIVE_NAME" >> $GITHUB_ENV
+          
+          # Kompres output menjadi format tar.xz (menggunakan -J / xz compression)
           cd ../
-          tar -czvf "kernel-6.12.y-${KERNEL_VER}.tar.gz" -C output .
+          tar -cJf "$ARCHIVE_NAME" -C output .
 
       - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          name: "Kernel 6.12.y Release (${{ env.KERNEL_VER }})"
+          name: "Kernel 6.12.y Release (${{ env.KERNEL_VER }}-reyre)"
           body: |
             ## Automated Build Kernel Linux 6.12.y
+            * **Signed By:** reyre
             * **Kernel Version:** ${{ env.KERNEL_VER }}
             * **Build Date:** ${{ github.event.repository.updated_at }}
             * **Config:** `config-6.12`
             * **Patch Source:** `kernel-patch/beta/linux-6.12.y`
           files: |
-            kernel-6.12.y-*.tar.gz
+            ${{ env.ARCHIVE_NAME }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
