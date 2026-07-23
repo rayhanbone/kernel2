@@ -104,26 +104,28 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up QEMU for ARM64 Emulation
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
       - name: Initialization Environment
         id: init
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          docker rmi $(docker images -q) 2>/dev/null || true
+          # 1. Bersihkan sisa direktori/file besar (JANGAN gunakan docker rmi)
           [[ -n "${AGENT_TOOLSDIRECTORY}" ]] && sudo rm -rf "${AGENT_TOOLSDIRECTORY}" || true
           sudo rm -rf /usr/share/dotnet /mnt/swapfile /root/.cargo ~/.rustup 2>/dev/null || true
           sudo swapoff -a || true
           sudo -E apt-get update
           
-          # Fix 'Exec format error' dengan meregistrasikan binfmt_misc secara mutlak
-          sudo -E apt-get install -y qemu-user-static binfmt-support
-          sudo docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+          # 2. Install QEMU & modul binfmt pendukung emulasi ARM64
+          sudo -E apt-get install -y qemu-user-static binfmt-support qemu-utils
+
+          # 3. Aktifkan dan restart binfmt_misc
+          sudo update-binfmts --enable qemu-aarch64
+          sudo systemctl restart systemd-binfmt 2>/dev/null || true
           
+          # 4. Pastikan biner QEMU tersalin ke path sistem
+          sudo cp -f /usr/bin/qemu-aarch64-static /usr/local/bin/ 2>/dev/null || true
+          
+          # 5. Install paket pembangun Armbian
           BUILD_PACKAGES=$(curl -fsSL https://tinyurl.com/ubuntu2204-build-armbian)
           sudo -E apt-get -y install ${BUILD_PACKAGES}
           
@@ -179,10 +181,6 @@ jobs:
             exit 1
           fi
 
-      # ----------------------------------------------------------------------
-      # Catatan: Jika source kernel di-clone oleh action Dirgha80 secara otomatis,
-      # patch kustom ini ditaruh tepat jika source sudah tersedia di /builder/kernel.
-      # ----------------------------------------------------------------------
       - name: Apply Custom Patches (if source exists)
         run: |
           PATCH_DIR="${GITHUB_WORKSPACE}/patches/${{ inputs.kernel_version }}"
@@ -194,7 +192,7 @@ jobs:
               patch -d /builder/kernel -p1 < "$patch" || { echo "❌ Failed patch: $patch"; exit 1; }
             done
           else
-            echo "ℹ️ No patches applied at this stage (directory empty or no patch found)."
+            echo "ℹ️ No patches applied at this stage."
           fi
 
       - name: Compile the Kernel [${{ inputs.kernel_version }}]
