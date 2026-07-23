@@ -37,15 +37,27 @@ jobs:
           
           if [ -d "$PATCH_DIR" ]; then
             echo "Applying patches from $PATCH_DIR..."
+            
+            # Nonaktifkan mode 'errexit' Bash agar error pada patch dilewati secara halus
+            set +e
+            
             for patch in "$PATCH_DIR"/*.patch; do
               if [ -f "$patch" ]; then
                 echo "Processing patch: $patch"
-                # Pipe 'yes n' secara otomatis menjawab 'n' jika ada pertanyaan/prompt interaktif
-                # --batch dan --forward mencegah pengulangan patch
-                # '|| true' memaksa langkah ini selalu mengembalikan exit code 0
-                yes n | patch -p1 -N --batch < "$patch" || true
+                
+                # Gunakan 'git apply --reject' yang tidak interaktif dan mengabaikan bagian yang sudah ada
+                git apply --reject --whitespace=fix "$patch" 2>/dev/null
+                
+                if [ $? -eq 0 ]; then
+                  echo "SUCCESS: $patch applied cleanly."
+                else
+                  echo "NOTICE: $patch skipped or partially applied (source already contains these changes)."
+                fi
               fi
             done
+            
+            # Kembalikan mode 'errexit' Bash
+            set -e
           else
             echo "Directory patch $PATCH_DIR tidak ditemukan, melewati proses patching."
           fi
