@@ -104,12 +104,18 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # --- [PERBAIKAN UTAMA] Set up QEMU BINFMT untuk AArch64/ARM64 ---
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64,aarch64
+
       - name: Initialization Environment
         id: init
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          # 1. Bersihkan sisa direktori/file besar (JANGAN gunakan docker rmi)
+          # 1. Bersihkan sisa direktori/file besar
           [[ -n "${AGENT_TOOLSDIRECTORY}" ]] && sudo rm -rf "${AGENT_TOOLSDIRECTORY}" || true
           sudo rm -rf /usr/share/dotnet /mnt/swapfile /root/.cargo ~/.rustup 2>/dev/null || true
           sudo swapoff -a || true
@@ -118,9 +124,8 @@ jobs:
           # 2. Install QEMU & modul binfmt pendukung emulasi ARM64
           sudo -E apt-get install -y qemu-user-static binfmt-support qemu-utils
 
-          # 3. Aktifkan dan restart binfmt_misc
-          sudo update-binfmts --enable qemu-aarch64
-          sudo systemctl restart systemd-binfmt 2>/dev/null || true
+          # 3. Registrasi ulang binfmt_misc secara mutlak (mencegah Exec format error)
+          sudo docker run --rm --privileged multiarch/qemu-user-static --reset -p yes || true
           
           # 4. Pastikan biner QEMU tersalin ke path sistem
           sudo cp -f /usr/bin/qemu-aarch64-static /usr/local/bin/ 2>/dev/null || true
