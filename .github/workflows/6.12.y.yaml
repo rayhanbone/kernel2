@@ -81,10 +81,9 @@ on:
       kernel_config:
         description: "Set the path of kernel .config"
         required: false
-        default: "kernel-config/release/DBAI"
+        default: "kernel-config/release/general"
         type: choice
         options:
-          - kernel-config/release/DBAI
           - kernel-config/release/general
           - "false"
 
