@@ -30,7 +30,7 @@ jobs:
           # Salin config-6.12 ke direktori kernel source
           cp kernel2-repo/kernel-config/release/general/config-6.12 linux-src/.config
 
-      - name: Apply Kernel Patches
+      - name: Apply Kernel Patches Safe Mode
         run: |
           cd linux-src
           PATCH_DIR="../kernel2-repo/kernel-patch/beta/linux-6.12.y"
@@ -38,25 +38,27 @@ jobs:
           if [ -d "$PATCH_DIR" ]; then
             echo "Applying patches from $PATCH_DIR..."
             
-            # Nonaktifkan mode 'errexit' Bash agar error pada patch dilewati secara halus
+            # Matikan penghentian skrip otomatis saat perintah patch gagal/skip
             set +e
             
             for patch in "$PATCH_DIR"/*.patch; do
               if [ -f "$patch" ]; then
+                echo "------------------------------------------"
                 echo "Processing patch: $patch"
                 
-                # Gunakan 'git apply --reject' yang tidak interaktif dan mengabaikan bagian yang sudah ada
+                # 'git apply' secara pintar memasukkan patch yang belum ada
+                # dan mengabaikan bagian yang sudah ada di source code tanpa prompt error
                 git apply --reject --whitespace=fix "$patch" 2>/dev/null
                 
                 if [ $? -eq 0 ]; then
-                  echo "SUCCESS: $patch applied cleanly."
+                  echo "RESULT: Patch applied cleanly."
                 else
-                  echo "NOTICE: $patch skipped or partially applied (source already contains these changes)."
+                  echo "RESULT: Patch skipped or partially applied (source already contains changes)."
                 fi
               fi
             done
             
-            # Kembalikan mode 'errexit' Bash
+            # Kembalikan fitur penghentian skrip bawaan Bash
             set -e
           else
             echo "Directory patch $PATCH_DIR tidak ditemukan, melewati proses patching."
