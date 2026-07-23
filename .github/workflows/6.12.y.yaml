@@ -30,7 +30,7 @@ jobs:
           # Salin config-6.12 ke direktori kernel source
           cp kernel2-repo/kernel-config/release/general/config-6.12 linux-src/.config
 
-      - name: Apply Kernel Patches Safe Mode
+      - name: Apply Kernel Patches
         run: |
           cd linux-src
           PATCH_DIR="../kernel2-repo/kernel-patch/beta/linux-6.12.y"
@@ -40,10 +40,10 @@ jobs:
             for patch in "$PATCH_DIR"/*.patch; do
               if [ -f "$patch" ]; then
                 echo "Processing patch: $patch"
-                # -N (--forward): Abaikan patch yang sudah ada / reversed
-                # --batch: Jalankan non-interaktif tanpa prompt y/n
-                # || true: Paksa agar bash mengabaikan exit code error jika patch dilewati
-                patch -p1 -N --batch < "$patch" || true
+                # Pipe 'yes n' secara otomatis menjawab 'n' jika ada pertanyaan/prompt interaktif
+                # --batch dan --forward mencegah pengulangan patch
+                # '|| true' memaksa langkah ini selalu mengembalikan exit code 0
+                yes n | patch -p1 -N --batch < "$patch" || true
               fi
             done
           else
