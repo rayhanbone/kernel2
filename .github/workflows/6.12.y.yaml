@@ -1,129 +1,75 @@
 name: Build Linux 6.12.y Kernel
 
 on:
-  workflow_dispatch: # Memungkinkan build dipicu secara manual dari tab Actions
+  workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Workflow Repository
+      - name: Checkout Kernel Source
         uses: actions/checkout@v4
+        with:
+          repository: 'rayhanbone/linux-6.12.y'
+          ref: 'linux-6.12.y'
+          path: 'linux-source'
 
-      - name: Install Dependencies
+      - name: Checkout Config & Patch Repository
+        uses: actions/checkout@v4
+        with:
+          repository: 'rayhanbone/kernel2'
+          path: 'kernel2-repo'
+
+      - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential libncurses-dev bison flex libssl-dev libelf-dev \
-            bc git wget curl ccache u-boot-tools crossbuild-essential-arm64 \
-            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu device-tree-compiler xz-utils
+          sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev libelf-dev bc git tar xz-utils gcc-aarch64-linux-gnu
 
-      - name: Clone Linux Kernel Source
+      - name: Apply Kernel Patches
         run: |
-          git clone --depth 1 -b main https://github.com/rayhanbone/linux-6.12.y.git linux-src
+          cd linux-source
+          echo "Applying patches..."
+          set +e # Mencegah workflow terhenti jika ada warning/skip pada patch
+          
+          for patch in ../kernel2-repo/kernel-patch/beta/linux-6.12.y/*.patch; do
+            if [ -f "$patch" ]; then
+              echo "----------------------------------------"
+              echo "Applying: $(basename "$patch")"
+              echo "----------------------------------------"
+              # Coba gunakan git apply dahulu, jika gagal fallback ke patch biasa dengan toleransi tinggi
+              git apply --whitespace=fix "$patch" || patch -p1 --ignore-whitespace -f < "$patch" || true
+            fi
+          done
+          
+          set -e # Kembalikan mode strict error handling
 
-      - name: Fetch Kernel Patch & Config from kernel2 Repository
+      - name: Apply Kernel Config
         run: |
-          git clone --depth 1 -b main https://github.com/rayhanbone/kernel2.git kernel2-repo
-          
-          # Salin config-6.12 ke direktori kernel source
-          cp kernel2-repo/kernel-config/release/general/config-6.12 linux-src/.config
+          cp kernel2-repo/config-6.12 linux-source/.config
+          cd linux-source
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
 
-      - name: Apply Kernel Patches Safe Mode
+      - name: Build Kernel (Tarball Package)
         run: |
-          cd linux-src
-          PATCH_DIR="../kernel2-repo/kernel-patch/beta/linux-6.12.y"
-          
-          if [ -d "$PATCH_DIR" ]; then
-            echo "Applying patches from $PATCH_DIR..."
-            
-            # Matikan penghentian skrip otomatis saat perintah patch gagal/skip
-            set +e
-            
-            for patch in "$PATCH_DIR"/*.patch; do
-              if [ -f "$patch" ]; then
-                echo "------------------------------------------"
-                echo "Processing patch: $patch"
-                
-                # 'git apply' secara pintar memasukkan patch yang belum ada
-                # dan mengabaikan bagian yang sudah ada di source code tanpa prompt error
-                git apply --reject --whitespace=fix "$patch" 2>/dev/null
-                
-                if [ $? -eq 0 ]; then
-                  echo "RESULT: Patch applied cleanly."
-                else
-                  echo "RESULT: Patch skipped or partially applied (source already contains changes)."
-                fi
-              fi
-            done
-            
-            # Kembalikan fitur penghentian skrip bawaan Bash
-            set -e
-          else
-            echo "Directory patch $PATCH_DIR tidak ditemukan, melewati proses patching."
-          fi
+          cd linux-source
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) bindeb-pkg || make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) Image dtbs modules
 
-      - name: Prepare Kernel Configuration
+      - name: Compress Kernel Output (.tar.xz)
         run: |
-          cd linux-src
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          make olddefconfig
+          mkdir -p output
+          # Sesuaikan direktori/file hasil kompilasi yang ingin dikemas
+          tar -cJf output/linux-6.12.y-arm64-reyre.tar.xz -C linux-source/arch/arm64/boot Image dts
 
-      - name: Compile Kernel Image & Modules
-        run: |
-          cd linux-src
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          
-          make -j$(nproc) Image dtbs modules
-
-      - name: Prepare Artifacts Package
-        run: |
-          cd linux-src
-          mkdir -p ../output/boot
-          
-          # Salin Kernel Image
-          cp arch/arm64/boot/Image ../output/boot/
-          
-          # Salin Device Tree Blobs (DTB)
-          cp -r arch/arm64/boot/dts/amlogic ../output/boot/ 2>/dev/null || true
-          cp -r arch/arm64/boot/dts/rockchip ../output/boot/ 2>/dev/null || true
-          
-          # Install modul ke folder output
-          mkdir -p ../output/modules
-          make INSTALL_MOD_PATH=../output/modules modules_install
-          
-          # Informasi versi kernel & tanggal build
-          KERNEL_VER=$(make kernelrelease)
-          BUILD_DATE=$(date +'%Y.%m.%d-%H%M')
-          
-          # Penandaan Sign -reyre & Format File .tar.xz
-          ARCHIVE_NAME="kernel-6.12.y-${KERNEL_VER}-${BUILD_DATE}-reyre.tar.xz"
-          
-          echo "KERNEL_VER=$KERNEL_VER" >> $GITHUB_ENV
-          echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
-          echo "ARCHIVE_NAME=$ARCHIVE_NAME" >> $GITHUB_ENV
-          
-          # Kompres output menjadi format tar.xz
-          cd ../
-          TAR_OPTIONS="--xz" tar -cvf "$ARCHIVE_NAME" -C output .
-
-      - name: Create or Update Release 6.12.y
-        uses: softprops/action-gh-release@v2
+      - name: Upload Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         with:
           tag_name: "6.12.y"
-          name: "Kernel Linux 6.12.y (reyre)"
-          body: |
-            ## Automated Build Kernel Linux 6.12.y
-            * **Signed By:** reyre
-            * **Kernel Version:** ${{ env.KERNEL_VER }}
-            * **Last Build Date:** ${{ env.BUILD_DATE }}
-            * **Config:** `config-6.12`
-            * **Patch Source:** `kernel-patch/beta/linux-6.12.y`
-          files: |
-            ${{ env.ARCHIVE_NAME }}
-          make_latest: true
+          name: "Linux Kernel 6.12.y ARM64 Build"
+          files: output/linux-6.12.y-arm64-reyre.tar.xz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
