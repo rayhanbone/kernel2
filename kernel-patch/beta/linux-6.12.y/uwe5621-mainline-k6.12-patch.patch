@@ -39,7 +39,7 @@ index 0000000000..aaaaaaaaaa
 
 diff --git a/drivers/net/wireless/uwe5621/Makefile b/drivers/net/wireless/uwe5621/Makefile
 new file mode 100644
-index 0000000000..bbbbbbbbbb
+index 0000000..1111111
 --- /dev/null
 +++ b/drivers/net/wireless/uwe5621/Makefile
 @@ -0,0 +1,22 @@
