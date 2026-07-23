@@ -78,35 +78,35 @@ jobs:
           mkdir -p ../output/modules
           make INSTALL_MOD_PATH=../output/modules modules_install
           
-          # Dapatkan versi kernel & format tanggal untuk Release Tag + Sign -reyre
+          # Dapatkan versi kernel & tanggal build
           KERNEL_VER=$(make kernelrelease)
           BUILD_DATE=$(date +'%Y.%m.%d-%H%M')
           
-          # Penandaan Sign -reyre
-          RELEASE_TAG="v${KERNEL_VER}-${BUILD_DATE}-reyre"
-          ARCHIVE_NAME="kernel-6.12.y-${KERNEL_VER}-reyre.tar.xz"
+          # Penandaan Sign -reyre & Format File .tar.xz
+          ARCHIVE_NAME="kernel-6.12.y-${KERNEL_VER}-${BUILD_DATE}-reyre.tar.xz"
           
           echo "KERNEL_VER=$KERNEL_VER" >> $GITHUB_ENV
-          echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
+          echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
           echo "ARCHIVE_NAME=$ARCHIVE_NAME" >> $GITHUB_ENV
           
-          # Kompres output menjadi format tar.xz (menggunakan -J / xz compression)
+          # Kompres output menjadi format tar.xz
           cd ../
           tar -cJf "$ARCHIVE_NAME" -C output .
 
-      - name: Create Release and Upload Assets
+      - name: Create or Update Release 6.12.y
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: "Kernel 6.12.y Release (${{ env.KERNEL_VER }}-reyre)"
+          tag_name: "6.12.y"
+          name: "Kernel Linux 6.12.y (reyre)"
           body: |
             ## Automated Build Kernel Linux 6.12.y
             * **Signed By:** reyre
             * **Kernel Version:** ${{ env.KERNEL_VER }}
-            * **Build Date:** ${{ github.event.repository.updated_at }}
+            * **Last Build Date:** ${{ env.BUILD_DATE }}
             * **Config:** `config-6.12`
             * **Patch Source:** `kernel-patch/beta/linux-6.12.y`
           files: |
             ${{ env.ARCHIVE_NAME }}
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
