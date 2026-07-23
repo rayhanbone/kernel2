@@ -28,7 +28,7 @@ jobs:
           git clone --depth 1 -b main https://github.com/rayhanbone/kernel2.git kernel2-repo
           
           # Salin config-6.12 ke direktori kernel source
-          cp kernel2-repo/kernel-config/release/general/config-6.12 linux-src/.config
+          cp kernel2-repo/kernel-config/release/DBAI/config-6.12 linux-src/.config
 
       - name: Apply Kernel Patches Safe Mode
         run: |
