@@ -108,6 +108,10 @@ on:
           - dtb
           - wifi_on
 
+# Wajib tambahkan permissions agar runner diizinkan membuat release
+permissions:
+  contents: write
+
 env:
   TZ: Asia/Jakarta
   PACKAGED_OUTPUTPATH: /builder/output
@@ -207,7 +211,7 @@ jobs:
           silent_log: true
 
       - name: Upload Kernel to Release (repo ini)
-        uses: ncipollo/release-action@main
+        uses: ncipollo/release-action@v1
         if: (env.PACKAGED_STATUS == 'success' || success()) && !cancelled()
         with:
           tag: kernel_${{ inputs.kernel_mu }}
@@ -230,7 +234,7 @@ jobs:
             | **S905x2** | **HG680FJ** | **NOT TEST** (`-`) |
 
       - name: Upload Kernel to Release (repo lain)
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         if: (env.PACKAGED_STATUS == 'success' || success()) && !cancelled()
         env:
           GITHUB_TOKEN: ${{ env.PAT }}
@@ -250,4 +254,6 @@ jobs:
             | **S905x**  | **HG680P**<br>**B860H** | **ON**<br>**NOT TEST** |
             | **S905X4** | **ADVAN AT01**<br>**AKARI** | **OFF**<br>**OFF** |
             | **S905x2** | **HG680FJ** | **NOT TEST** (`-`) |
-          files: /builder/output/*
+
+          files: |
+            /builder/output/*
